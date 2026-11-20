@@ -33,8 +33,8 @@ async function handleChat(request, env) {
   }
 
   try {
-    const reply = await runLoop(history, message, env);
-    return json({ reply });
+    const { reply, messages } = await runLoop(history, message, env);
+    return json({ reply, messages });
   } catch (err) {
     if (err instanceof ConfigError) {
       console.error(`LLM config problem: ${err.message}`);
