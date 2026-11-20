@@ -7,6 +7,9 @@ const LLM_MODEL = "deepseek-v4.1-flash";
 
 const LLM_TIMEOUT_MS = 20_000;
 const MAX_ROUNDS = 8;
+const TURN_BUDGET_MS = 40_000;
+// Each tool call is one fetch; with MAX_ROUNDS model calls this stays under the 50-subrequest limit.
+const MAX_TOOL_CALLS = 30;
 
 /**
  * Run the agentic loop for one user turn and return Uncle's reply.
@@ -33,8 +36,11 @@ export async function runLoop(history, message, env) {
   // so the OpenCode Go endpoint can route and cache consistently.
   const sessionId = crypto.randomUUID();
 
+  const startedAt = Date.now();
   let round = 0;
-  while (round < MAX_ROUNDS) {
+  let toolCallsUsed = 0;
+  while (!shouldStop({ round, startedAt, now: Date.now() })) {
+    round += 1;
     const assistant = await callModel(messages, env, sessionId);
     messages.push(assistant);
 
@@ -46,7 +52,13 @@ export async function runLoop(history, message, env) {
     for (const call of toolCalls) {
       const args = parseArgs(call.function.arguments);
       console.log(`round ${round}: ${call.function.name}`, args);
-      const result = await executeTool(call.function.name, args, env);
+      let result;
+      if (toolCallsUsed >= MAX_TOOL_CALLS) {
+        result = JSON.stringify({ error: "Tool call limit reached. Answer with what you have." });
+      } else {
+        toolCallsUsed += 1;
+        result = await executeTool(call.function.name, args, env);
+      }
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -103,6 +115,13 @@ function isHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Decide whether the loop must stop before making another model call.
+ */
+export function shouldStop({ round, startedAt, now }) {
+  return round >= MAX_ROUNDS || now - startedAt >= TURN_BUDGET_MS;
 }
 
 async function callModel(messages, env, sessionId) {
