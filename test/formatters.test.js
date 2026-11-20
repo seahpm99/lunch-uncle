@@ -119,3 +119,26 @@ test("formatPlaces reports open, closed and unknown opening status", () => {
     ],
   );
 });
+
+test("formatPlaces gives a place without a location a null distance", () => {
+  const origin = { latitude: 1.3115, longitude: 103.8615 };
+  const places = [
+    { displayName: { text: "No Pin Kopitiam" }, rating: 4.1 },
+    {
+      displayName: { text: "Lavender Food Square" },
+      location: { latitude: 1.3073, longitude: 103.8631 },
+    },
+  ];
+
+  const result = formatPlaces(places, origin);
+
+  assert.deepEqual(result[0], {
+    name: "No Pin Kopitiam",
+    rating: 4.1,
+    distance_m: null,
+    open_now: null,
+  });
+  assert.equal(result[1].name, "Lavender Food Square");
+  assert.equal(result[1].rating, null);
+  assert.ok(result[1].distance_m > 400 && result[1].distance_m < 550);
+});

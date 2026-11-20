@@ -18,6 +18,9 @@ const FORECAST_URL =
   "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast";
 const BUS_URL = "https://arrivelah2.busrouter.sg/";
 
+// Bounds each tool fetch so a hung upstream cannot stall the whole turn.
+const TOOL_TIMEOUT_MS = 8000;
+
 // ---------------------------------------------------------------------------
 // Definitions sent to the model
 // ---------------------------------------------------------------------------
@@ -84,15 +87,23 @@ export const toolDefinitions = [
  * Run one tool call requested by the model and return the result as a string.
  */
 export async function executeTool(name, args, env) {
-  switch (name) {
-    case "find_lunch_places":
-      return JSON.stringify(await findLunchPlaces(args, env));
-    case "get_rain_forecast":
-      return JSON.stringify(await getRainForecast());
-    case "get_bus_arrivals":
-      return JSON.stringify(await getBusArrivals(args));
-    default:
-      return JSON.stringify({ error: `Unknown tool: ${name}` });
+  const safeArgs =
+    args && typeof args === "object" && !Array.isArray(args) ? args : {};
+  try {
+    switch (name) {
+      case "find_lunch_places":
+        return JSON.stringify(await findLunchPlaces(safeArgs, env));
+      case "get_rain_forecast":
+        return JSON.stringify(await getRainForecast());
+      case "get_bus_arrivals":
+        return JSON.stringify(await getBusArrivals(safeArgs));
+      default:
+        return JSON.stringify({ error: `Unknown tool: ${name}` });
+    }
+  } catch (err) {
+    const reason = err?.name === "TimeoutError" ? "timed out" : err?.message;
+    console.error(`Tool ${name} failed:`, reason);
+    return JSON.stringify({ error: `${name} failed: ${reason}` });
   }
 }
 
@@ -128,6 +139,7 @@ async function findLunchPlaces({ query, open_now = false }, env) {
         "places.id,places.displayName,places.location,places.rating,places.currentOpeningHours",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -147,7 +159,9 @@ export function formatPlaces(places, origin) {
     return {
       name: displayName?.text ?? "Unnamed",
       rating: rating ?? null,
-      distance_m: Math.round(haversineMetres(origin, location)),
+      distance_m: location
+        ? Math.round(haversineMetres(origin, location))
+        : null,
       // null means Google has no hours for this place, which is not the same as closed.
       open_now: typeof openNow === "boolean" ? openNow : null,
     };
@@ -187,7 +201,9 @@ export function haversineMetres(a, b) {
 // ---------------------------------------------------------------------------
 
 async function getRainForecast() {
-  const res = await fetch(FORECAST_URL);
+  const res = await fetch(FORECAST_URL, {
+    signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
+  });
   if (!res.ok) {
     return { error: `Forecast API returned ${res.status}` };
   }
@@ -216,7 +232,7 @@ export function formatForecast(payload, area) {
 
 async function getBusArrivals({ stop_code }) {
   const url = `${BUS_URL}?id=${encodeURIComponent(stop_code)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
   if (!res.ok) {
     return { error: `Bus API returned ${res.status}` };
   }
