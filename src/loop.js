@@ -21,9 +21,10 @@ const INVALID_ARGS_RESULT = JSON.stringify({
 const MAX_ERROR_BODY = 300;
 
 /**
- * Run the agentic loop for one user turn and return Uncle's reply.
+ * Run the agentic loop for one user turn and return Uncle's reply plus this turn's messages.
  *
- * history is the prior conversation as OpenAI-style {role, content} messages.
+ * history is the prior conversation as OpenAI-style user, assistant and tool messages.
+ * messages holds everything after the user's message, for the client to send back next turn.
  */
 export async function runLoop(history, message, env) {
   const messages = [
@@ -35,6 +36,7 @@ export async function runLoop(history, message, env) {
       content: `[Singapore time: ${formatSingaporeTime(new Date())}]\n${message}`,
     },
   ];
+  const turnStart = messages.length;
 
   const problems = findLlmConfigProblems({
     baseUrl: LLM_BASE_URL,
@@ -58,7 +60,10 @@ export async function runLoop(history, message, env) {
     const outcome = finishOutcome(choice);
     messages.push(outcome.message);
     if (outcome.reply !== undefined) {
-      return outcome.reply;
+      return {
+        reply: outcome.reply,
+        messages: messages.slice(turnStart).map(toHistoryMessage),
+      };
     }
 
     for (const call of outcome.message.tool_calls) {
@@ -82,7 +87,31 @@ export async function runLoop(history, message, env) {
     }
   }
 
-  return "Uncle tried too many times already. Ask something simpler.";
+  return finish(
+    "Uncle tried too many times already. Ask something simpler.",
+    messages.slice(turnStart).map(toHistoryMessage),
+  );
+}
+
+function finish(reply, turnMessages) {
+  return { reply, messages: [...turnMessages, { role: "assistant", content: reply }] };
+}
+
+/**
+ * Reduce a message to the fields the chat history keeps.
+ * Assistant messages lose provider extras such as reasoning_content so they are not re-sent every turn.
+ */
+export function toHistoryMessage(msg) {
+  if (msg.role !== "assistant") return msg;
+  const out = { role: "assistant", content: msg.content ?? null };
+  if (msg.tool_calls?.length) {
+    out.tool_calls = msg.tool_calls.map((call) => ({
+      id: call.id,
+      type: "function",
+      function: { name: call.function?.name ?? "", arguments: call.function?.arguments ?? "{}" },
+    }));
+  }
+  return out;
 }
 
 /** Thrown when the LLM settings cannot work, so the caller can tell the developer what to fix. */
