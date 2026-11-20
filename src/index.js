@@ -1,5 +1,5 @@
 import ui from "./ui.html";
-import { runLoop } from "./loop.js";
+import { runLoop, ConfigError } from "./loop.js";
 
 export default {
   async fetch(request, env) {
@@ -36,6 +36,10 @@ async function handleChat(request, env) {
     const reply = await runLoop(history, message, env);
     return json({ reply });
   } catch (err) {
+    if (err instanceof ConfigError) {
+      console.error(`LLM config problem: ${err.message}`);
+      return json({ error: `Uncle is not set up yet. ${err.message}` }, 503);
+    }
     console.error("chat failed:", err);
     return json({ error: "Uncle cannot think right now, try again later." }, 500);
   }

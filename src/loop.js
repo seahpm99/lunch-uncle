@@ -1,9 +1,9 @@
 import { buildSystemPrompt } from "./prompt.js";
 import { toolDefinitions, executeTool } from "./tools.js";
 
-// TODO: set the base URL and model for your OpenAI-compatible provider.
-const LLM_BASE_URL = "TODO";
-const LLM_MODEL = "TODO";
+// Base URL of an OpenAI-compatible API, without /chat/completions (callModel appends it).
+const LLM_BASE_URL = "https://opencode.ai/inference/go/openai/v1";
+const LLM_MODEL = "deepseek-v4.1-flash";
 
 const LLM_TIMEOUT_MS = 20_000;
 const MAX_ROUNDS = 8;
@@ -27,6 +27,15 @@ export async function runLoop(history, message, env) {
     ...history,
     { role: "user", content: message },
   ];
+
+  const problems = findLlmConfigProblems({
+    baseUrl: LLM_BASE_URL,
+    model: LLM_MODEL,
+    apiKey: env.OPENCODE_API_KEY,
+  });
+  if (problems.length > 0) {
+    throw new ConfigError(problems);
+  }
 
   // One session id per turn, shared by every model call in this loop run,
   // so the OpenCode Go endpoint can route and cache consistently.
@@ -55,6 +64,53 @@ export async function runLoop(history, message, env) {
   }
 
   return "Uncle tried too many times already. Ask something simpler.";
+}
+
+/** Thrown when the LLM settings cannot work, so the caller can tell the developer what to fix. */
+export class ConfigError extends Error {
+  constructor(problems) {
+    super(problems.join(" "));
+    this.name = "ConfigError";
+    this.problems = problems;
+  }
+}
+
+/**
+ * List what is wrong with the LLM settings; empty when they look usable.
+ * Problems name the variable, never its value, so they are safe to show and log.
+ */
+export function findLlmConfigProblems({ baseUrl, model, apiKey }) {
+  const problems = [];
+  const url = typeof baseUrl === "string" ? baseUrl.trim() : "";
+  if (isUnset(url)) {
+    problems.push("LLM_BASE_URL in src/loop.js is not set.");
+  } else if (!isHttpUrl(url)) {
+    problems.push("LLM_BASE_URL in src/loop.js is not a valid http(s) URL.");
+  } else if (/\/chat\/completions\/?$/.test(url)) {
+    problems.push(
+      "LLM_BASE_URL in src/loop.js must not end in /chat/completions; callModel adds that.",
+    );
+  }
+  if (isUnset(typeof model === "string" ? model.trim() : "")) {
+    problems.push("LLM_MODEL in src/loop.js is not set.");
+  }
+  if (typeof apiKey !== "string" || apiKey.trim() === "") {
+    problems.push("OPENCODE_API_KEY is missing from .env or the Worker secrets.");
+  }
+  return problems;
+}
+
+function isUnset(value) {
+  return value === "" || value.toUpperCase() === "TODO";
+}
+
+function isHttpUrl(value) {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 async function callModel(messages, env, sessionId) {
