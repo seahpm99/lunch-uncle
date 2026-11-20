@@ -6,6 +6,7 @@ import {
   formatBusArrivals,
   formatPlaces,
   haversineMetres,
+  boundingBox,
 } from "../src/tools.js";
 
 test("formatForecast picks the requested area", () => {
@@ -74,4 +75,20 @@ test("formatPlaces measures distance from CT Hub 2, not Bedok", () => {
   const [nearby, bedok] = formatPlaces(places, CT_HUB_2);
   assert.ok(nearby.distance_m < 100, `got ${nearby.distance_m}`);
   assert.ok(bedok.distance_m > 7000, `got ${bedok.distance_m}`);
+});
+
+test("boundingBox edges sit the given distance from the centre", () => {
+  const centre = { latitude: 1.3115, longitude: 103.8615 };
+  const { low, high } = boundingBox(centre, 1000);
+  assert.ok(low.latitude < high.latitude && low.longitude < high.longitude);
+  const edges = [
+    { latitude: low.latitude, longitude: centre.longitude },
+    { latitude: high.latitude, longitude: centre.longitude },
+    { latitude: centre.latitude, longitude: low.longitude },
+    { latitude: centre.latitude, longitude: high.longitude },
+  ];
+  for (const edge of edges) {
+    const d = haversineMetres(centre, edge);
+    assert.ok(Math.abs(d - 1000) < 5, `got ${d}`);
+  }
 });
