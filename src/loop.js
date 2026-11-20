@@ -11,6 +11,15 @@ const TURN_BUDGET_MS = 40_000;
 // Each tool call is one fetch; with MAX_ROUNDS model calls this stays under the 50-subrequest limit.
 const MAX_TOOL_CALLS = 30;
 
+const EMPTY_REPLY = "Uncle blur already, nothing to say. Ask again?";
+const FILTERED_REPLY = "Aiyo, Uncle cannot answer that one. Ask about lunch instead.";
+const CUT_OFF_NOTE = "\n\n(Uncle talk too much, got cut off.)";
+const TRUNCATED_CALL_REPLY = "Uncle lost track halfway. Ask again, maybe shorter.";
+const INVALID_ARGS_RESULT = JSON.stringify({
+  error: "invalid arguments JSON; call again with valid JSON",
+});
+const MAX_ERROR_BODY = 300;
+
 /**
  * Run the agentic loop for one user turn and return Uncle's reply.
  *
@@ -41,23 +50,25 @@ export async function runLoop(history, message, env) {
   let toolCallsUsed = 0;
   while (!shouldStop({ round, startedAt, now: Date.now() })) {
     round += 1;
-    const assistant = await callModel(messages, env, sessionId);
-    messages.push(assistant);
-
-    const toolCalls = assistant.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      return assistant.content ?? "";
+    const choice = await callModel(messages, env, sessionId);
+    const outcome = finishOutcome(choice);
+    messages.push(outcome.message);
+    if (outcome.reply !== undefined) {
+      return outcome.reply;
     }
 
-    for (const call of toolCalls) {
-      const args = parseArgs(call.function.arguments);
-      console.log(`round ${round}: ${call.function.name}`, args);
+    for (const call of outcome.message.tool_calls) {
+      const name = call.function?.name;
+      const args = parseArgs(call.function?.arguments);
+      console.log(`round ${round}: ${name}`, args);
       let result;
-      if (toolCallsUsed >= MAX_TOOL_CALLS) {
+      if (!args.ok) {
+        result = INVALID_ARGS_RESULT;
+      } else if (toolCallsUsed >= MAX_TOOL_CALLS) {
         result = JSON.stringify({ error: "Tool call limit reached. Answer with what you have." });
       } else {
         toolCallsUsed += 1;
-        result = await executeTool(call.function.name, args, env);
+        result = await executeTool(name, args.value, env);
       }
       messages.push({
         role: "tool",
@@ -140,18 +151,89 @@ async function callModel(messages, env, sessionId) {
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
 
+  const body = await res.text();
   if (!res.ok) {
-    throw new Error(`LLM returned ${res.status}: ${await res.text()}`);
+    throw new Error(`LLM returned ${res.status}: ${truncate(body)}`);
   }
 
-  const data = await res.json();
-  return data.choices[0].message;
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new Error(`LLM returned non-JSON body: ${truncate(body)}`);
+  }
+  return pickChoice(data);
 }
 
-function parseArgs(raw) {
-  try {
-    return JSON.parse(raw || "{}");
-  } catch {
-    return {};
+/** Return the first choice of a completion, or throw a readable error when there is none. */
+export function pickChoice(data) {
+  const choice = data?.choices?.[0];
+  if (choice && typeof choice.message === "object" && choice.message !== null) {
+    return choice;
   }
+  const detail = data?.error?.message ?? JSON.stringify(data);
+  throw new Error(`LLM returned no choices: ${truncate(String(detail))}`);
+}
+
+/**
+ * Decide what one model choice means for the loop.
+ *
+ * Returns {message, reply} when the turn ends, else {message} whose tool_calls all have an id.
+ * message is what to append to the history either way.
+ */
+export function finishOutcome(choice) {
+  const message = choice.message ?? {};
+  const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const text = typeof message.content === "string" ? message.content : "";
+  const end = (reply) => ({ message: { role: "assistant", content: reply }, reply });
+
+  if (choice.finish_reason === "content_filter") {
+    return end(FILTERED_REPLY);
+  }
+  if (choice.finish_reason === "length") {
+    // A cut-off tool call has incomplete arguments JSON, so it must not run.
+    if (calls.length > 0) return end(TRUNCATED_CALL_REPLY);
+    return end(text.trim() ? text + CUT_OFF_NOTE : EMPTY_REPLY);
+  }
+  if (calls.length === 0) {
+    return end(text.trim() ? text : EMPTY_REPLY);
+  }
+
+  // The provider rejects a tool message whose tool_call_id matches no assistant call,
+  // and expects arguments in the history as a JSON string.
+  const toolCalls = calls.map((call) => {
+    const fn = call.function;
+    const args = fn?.arguments;
+    return {
+      ...call,
+      id: call.id || `call_${crypto.randomUUID().replaceAll("-", "")}`,
+      ...(args !== null && typeof args === "object"
+        ? { function: { ...fn, arguments: JSON.stringify(args) } }
+        : {}),
+    };
+  });
+  return { message: { ...message, tool_calls: toolCalls } };
+}
+
+/** Parse tool-call arguments: {ok: true, value} when they are an object, else {ok: false}. */
+export function parseArgs(raw) {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: {} };
+  }
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return { ok: false };
+    }
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+}
+
+function truncate(text) {
+  return text.length > MAX_ERROR_BODY ? `${text.slice(0, MAX_ERROR_BODY)}...` : text;
 }
