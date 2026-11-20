@@ -9,7 +9,7 @@
 // CT Hub 2, 114 Lavender Street.
 export const CT_HUB_2 = { latitude: 1.31154, longitude: 103.86275 };
 
-const SEARCH_RADIUS_METRES = 800;
+const SEARCH_RADIUS_METRES = 1000;
 const MAX_PLACES = 10;
 const FORECAST_AREA = "Kallang";
 
@@ -39,7 +39,8 @@ export const toolDefinitions = [
           },
           open_now: {
             type: "boolean",
-            description: "Only return places that are open right now.",
+            description:
+              "Only return places open at this moment. Set it only when the user wants to eat right now, not when asking about lunch later.",
           },
         },
         required: ["query"],
@@ -110,11 +111,11 @@ async function findLunchPlaces({ query, open_now = false }, env) {
 
   const body = {
     textQuery: query,
-    includedType: "restaurant",
     openNow: open_now,
     pageSize: MAX_PLACES,
-    locationBias: {
-      circle: { center: CT_HUB_2, radius: SEARCH_RADIUS_METRES },
+    // A bias still lets far-away matches through; searchText restricts only by rectangle.
+    locationRestriction: {
+      rectangle: boundingBox(CT_HUB_2, SEARCH_RADIUS_METRES),
     },
   };
 
@@ -146,6 +147,18 @@ export function formatPlaces(places, origin) {
     rating: rating ?? null,
     distance_m: Math.round(haversineMetres(origin, location)),
   }));
+}
+
+/**
+ * Rectangle reaching the given distance north, south, east and west of a point, as Places low/high corners.
+ */
+export function boundingBox(centre, metres) {
+  const dLat = metres / 111320;
+  const dLon = dLat / Math.cos((centre.latitude * Math.PI) / 180);
+  return {
+    low: { latitude: centre.latitude - dLat, longitude: centre.longitude - dLon },
+    high: { latitude: centre.latitude + dLat, longitude: centre.longitude + dLon },
+  };
 }
 
 /**
