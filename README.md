@@ -50,12 +50,12 @@ sequenceDiagram
    Open http://localhost:8787 and chat with Uncle.
 6. To deploy, set the secrets on Cloudflare first, then deploy:
    ```sh
-   wrangler secret put OPENCODE_API_KEY
-   wrangler secret put GOOGLE_PLACES_API_KEY
+   npx wrangler secret put OPENCODE_API_KEY
+   npx wrangler secret put GOOGLE_PLACES_API_KEY
    npm run deploy
    ```
 
-Secrets never go in code or in `wrangler.toml`. Local development reads them from `.env`, which is gitignored; production reads them from Cloudflare secrets set with `wrangler secret put`.
+Secrets never go in code or in `wrangler.toml`. Local development reads them from `.env`. If a `.dev.vars` file exists, wrangler reads that instead and ignores `.env` entirely, so keep all local keys in one file. Both files are gitignored. Production reads secrets from Cloudflare, set with `npx wrangler secret put`.
 
 ## Running tests
 
