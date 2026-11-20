@@ -11,25 +11,62 @@ import {
   normalizeStopCode,
 } from "../src/tools.js";
 
-test("formatForecast picks the requested area", () => {
-  const payload = {
-    data: {
-      items: [
-        {
-          valid_period: { text: "12 pm to 2 pm" },
-          forecasts: [
-            { area: "Geylang", forecast: "Fair" },
-            { area: "Kallang", forecast: "Light Rain" },
-          ],
+const forecastPayload = {
+  data: {
+    items: [
+      {
+        valid_period: {
+          start: "2026-11-20T12:00:00+08:00",
+          end: "2026-11-20T14:00:00+08:00",
+          text: "Midday to 2 pm",
         },
-      ],
-    },
-  };
+        forecasts: [
+          { area: "Geylang", forecast: "Fair" },
+          { area: "Kallang", forecast: "Light Rain" },
+        ],
+      },
+    ],
+  },
+};
 
-  assert.deepEqual(formatForecast(payload, "Kallang"), {
+test("formatForecast picks the requested area with its window in Singapore time", () => {
+  const now = new Date("2026-11-20T12:30:00+08:00");
+
+  assert.deepEqual(formatForecast(forecastPayload, "Kallang", now), {
     area: "Kallang",
     forecast: "Light Rain",
-    valid_period: "12 pm to 2 pm",
+    valid_period: "Midday to 2 pm",
+    valid_from: "12:00",
+    valid_until: "14:00",
+    now: "12:30",
+    stale: false,
+  });
+});
+
+test("formatForecast marks a forecast stale once its window has ended", () => {
+  const now = new Date("2026-11-20T15:10:00+08:00");
+
+  const result = formatForecast(forecastPayload, "Kallang", now);
+
+  assert.equal(result.stale, true);
+  assert.equal(result.valid_until, "14:00");
+  assert.equal(result.now, "15:10");
+});
+
+test("formatForecast reports Unknown for an area not in the payload", () => {
+  const now = new Date("2026-11-20T12:30:00+08:00");
+
+  assert.equal(formatForecast(forecastPayload, "Tuas", now).forecast, "Unknown");
+});
+
+test("formatForecast returns an error when the payload has no forecasts", () => {
+  const now = new Date("2026-11-20T12:30:00+08:00");
+
+  assert.deepEqual(formatForecast({ data: { items: [{}] } }, "Kallang", now), {
+    error: "No forecast available",
+  });
+  assert.deepEqual(formatForecast({ data: {} }, "Kallang", now), {
+    error: "No forecast available",
   });
 });
 
