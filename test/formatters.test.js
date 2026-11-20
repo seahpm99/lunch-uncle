@@ -92,3 +92,30 @@ test("boundingBox edges sit the given distance from the centre", () => {
     assert.ok(Math.abs(d - 1000) < 5, `got ${d}`);
   }
 });
+
+test("formatPlaces reports open, closed and unknown opening status", () => {
+  const origin = { latitude: 1.3115, longitude: 103.8615 };
+  const places = [
+    {
+      displayName: { text: "Open Stall" },
+      rating: 4.2,
+      location: origin,
+      currentOpeningHours: { openNow: true },
+    },
+    {
+      displayName: { text: "Closed Stall" },
+      location: origin,
+      currentOpeningHours: { openNow: false },
+    },
+    { displayName: { text: "No Hours Stall" }, location: origin },
+  ];
+
+  assert.deepEqual(
+    formatPlaces(places, origin).map(({ name, open_now }) => ({ name, open_now })),
+    [
+      { name: "Open Stall", open_now: true },
+      { name: "Closed Stall", open_now: false },
+      { name: "No Hours Stall", open_now: null },
+    ],
+  );
+});
