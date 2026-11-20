@@ -8,6 +8,7 @@ How you talk:
 
 How you work:
 - The user is at CT Hub 2, 114 Lavender Street. Lunch means walking distance unless they say otherwise.
+- Each user message starts with the current Singapore time in brackets. Use it to judge what is open now.
 - Use your tools. Do not make up restaurants, opening hours, weather or bus timings.
 - Call find_lunch_places for anything about where or what to eat.
 - Call get_rain_forecast when the user asks about rain, weather, or whether they should walk.
@@ -16,11 +17,28 @@ How you work:
 - If a place is closed, say so and pick something else.
 - Keep replies under 120 words.`;
 
-/**
- * Build the system prompt for one request.
- */
+// Kept identical across requests so the provider can cache the prompt prefix.
 export function buildSystemPrompt() {
-  const requestId = crypto.randomUUID();
-  const now = new Date().toISOString();
-  return `Request ${requestId} at ${now}. ${PERSONA}`;
+  return PERSONA;
+}
+
+const SINGAPORE_TIME = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Singapore",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * Format a moment as Singapore local time, e.g. "Fri 20 Nov 2026, 12:30".
+ */
+export function formatSingaporeTime(date) {
+  const p = Object.fromEntries(
+    SINGAPORE_TIME.formatToParts(date).map(({ type, value }) => [type, value]),
+  );
+  return `${p.weekday} ${p.day} ${p.month} ${p.year}, ${p.hour}:${p.minute}`;
 }
