@@ -55,7 +55,7 @@ export const toolDefinitions = [
     function: {
       name: "get_rain_forecast",
       description:
-        "Get the two-hour weather forecast for the Kallang area, which covers CT Hub 2.",
+        "Get the two-hour weather forecast for the Kallang area, which covers CT Hub 2. Times are Singapore local (HH:MM). The forecast only covers valid_from to valid_until; if the user asks about a time outside that window, say the forecast does not cover it. stale: true means the forecast has expired and may be out of date.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -208,23 +208,37 @@ async function getRainForecast() {
   if (!res.ok) {
     return { error: `Forecast API returned ${res.status}` };
   }
-  return formatForecast(await res.json(), FORECAST_AREA);
+  return formatForecast(await res.json(), FORECAST_AREA, new Date());
 }
 
 /**
- * Pull one area's forecast out of the data.gov.sg two-hour forecast payload.
+ * Pull one area's forecast out of the data.gov.sg two-hour forecast payload,
+ * with its validity window in Singapore time and whether it expired before `now`.
  */
-export function formatForecast(payload, area) {
+export function formatForecast(payload, area, now) {
   const item = payload?.data?.items?.[0];
-  if (!item) {
+  if (!item || !Array.isArray(item.forecasts)) {
     return { error: "No forecast available" };
   }
   const entry = item.forecasts.find((f) => f.area === area);
+  const end = Date.parse(item.valid_period?.end);
   return {
     area,
     forecast: entry?.forecast ?? "Unknown",
     valid_period: item.valid_period?.text ?? null,
+    valid_from: singaporeTime(Date.parse(item.valid_period?.start)),
+    valid_until: singaporeTime(end),
+    now: singaporeTime(now.getTime()),
+    stale: Number.isFinite(end) && now.getTime() > end,
   };
+}
+
+// Singapore is UTC+8 all year, so a fixed offset is exact and needs no time zone data.
+function singaporeTime(ms) {
+  if (!Number.isFinite(ms)) {
+    return null;
+  }
+  return new Date(ms + 8 * 3_600_000).toISOString().slice(11, 16);
 }
 
 // ---------------------------------------------------------------------------
