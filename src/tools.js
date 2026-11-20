@@ -142,11 +142,16 @@ async function findLunchPlaces({ query, open_now = false }, env) {
  * Shape Places API results into the fields Uncle needs.
  */
 export function formatPlaces(places, origin) {
-  return places.map(({ displayName, rating, location }) => ({
-    name: displayName?.text ?? "Unnamed",
-    rating: rating ?? null,
-    distance_m: Math.round(haversineMetres(origin, location)),
-  }));
+  return places.map(({ displayName, rating, location, currentOpeningHours }) => {
+    const openNow = currentOpeningHours?.openNow;
+    return {
+      name: displayName?.text ?? "Unnamed",
+      rating: rating ?? null,
+      distance_m: Math.round(haversineMetres(origin, location)),
+      // null means Google has no hours for this place, which is not the same as closed.
+      open_now: typeof openNow === "boolean" ? openNow : null,
+    };
+  });
 }
 
 /**
