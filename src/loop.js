@@ -1,4 +1,4 @@
-import { buildSystemPrompt } from "./prompt.js";
+import { buildSystemPrompt, formatSingaporeTime } from "./prompt.js";
 import { toolDefinitions, executeTool } from "./tools.js";
 
 // Base URL of an OpenAI-compatible API, without /chat/completions (callModel appends it).
@@ -29,7 +29,11 @@ export async function runLoop(history, message, env) {
   const messages = [
     { role: "system", content: buildSystemPrompt() },
     ...history,
-    { role: "user", content: message },
+    // The time goes after the history so the cached prefix stays stable.
+    {
+      role: "user",
+      content: `[Singapore time: ${formatSingaporeTime(new Date())}]\n${message}`,
+    },
   ];
 
   const problems = findLlmConfigProblems({
