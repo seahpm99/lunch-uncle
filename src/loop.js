@@ -10,6 +10,9 @@ const MAX_ROUNDS = 8;
 const TURN_BUDGET_MS = 40_000;
 // Each tool call is one fetch; with MAX_ROUNDS model calls this stays under the 50-subrequest limit.
 const MAX_TOOL_CALLS = 30;
+// Room for a short reply or a tool-call JSON payload.
+const MAX_OUTPUT_TOKENS = 800;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 
 const EMPTY_REPLY = "Uncle blur already, nothing to say. Ask again?";
 const FILTERED_REPLY = "Aiyo, Uncle cannot answer that one. Ask about lunch instead.";
@@ -26,7 +29,7 @@ const MAX_ERROR_BODY = 300;
  * history is the prior conversation as OpenAI-style user, assistant and tool messages.
  * messages holds everything after the user's message, for the client to send back next turn.
  */
-export async function runLoop(history, message, env) {
+export async function runLoop(history, message, env, clientSessionId) {
   const messages = [
     { role: "system", content: buildSystemPrompt() },
     ...history,
@@ -47,9 +50,8 @@ export async function runLoop(history, message, env) {
     throw new ConfigError(problems);
   }
 
-  // One session id per turn, shared by every model call in this loop run,
-  // so the OpenCode Go endpoint can route and cache consistently.
-  const sessionId = crypto.randomUUID();
+  // The same id across turns lets the OpenCode Go endpoint route to the backend holding the cached prefix.
+  const sessionId = pickSessionId(clientSessionId);
 
   const startedAt = Date.now();
   let round = 0;
@@ -180,6 +182,7 @@ async function callModel(messages, env, sessionId) {
       model: LLM_MODEL,
       messages,
       tools: toolDefinitions,
+      max_tokens: MAX_OUTPUT_TOKENS,
     }),
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
@@ -196,6 +199,14 @@ async function callModel(messages, env, sessionId) {
     throw new Error(`LLM returned non-JSON body: ${truncate(body)}`);
   }
   return pickChoice(data);
+}
+
+/** Use the client's session id when it is safe to put in a header, else a fresh random one. */
+export function pickSessionId(candidate) {
+  if (typeof candidate === "string" && SESSION_ID_PATTERN.test(candidate)) {
+    return candidate;
+  }
+  return crypto.randomUUID();
 }
 
 /** Return the first choice of a completion, or throw a readable error when there is none. */

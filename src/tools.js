@@ -202,8 +202,10 @@ export function haversineMetres(a, b) {
 // ---------------------------------------------------------------------------
 
 async function getRainForecast() {
+  // data.gov.sg refreshes about every 30 minutes, so a 5-minute edge cache is safe.
   const res = await fetch(FORECAST_URL, {
     signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
+    cf: { cacheTtl: 300, cacheEverything: true },
   });
   if (!res.ok) {
     return { error: `Forecast API returned ${res.status}` };
