@@ -21,6 +21,7 @@
     }
     .uncle { background: var(--uncle); align-self: flex-start; border-bottom-left-radius: .25rem; }
     .you { background: var(--you); align-self: flex-end; border-bottom-right-radius: .25rem; }
+    .uncle.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
     form { display: flex; gap: .5rem; padding: 1rem; background: #fff; border-top: 1px solid #e5e7eb; }
     input { flex: 1; padding: .6rem .9rem; font-size: 1rem; border: 1px solid #d1d5db; border-radius: .5rem; }
     button { padding: .6rem 1.2rem; font-size: 1rem; border: 0; border-radius: .5rem; background: var(--ink); color: #fff; cursor: pointer; }
@@ -61,7 +62,7 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const message = input.value.trim();
-      if (!message) return;
+      if (!message || send.disabled) return;
 
       input.value = "";
       send.disabled = true;
@@ -73,17 +74,25 @@
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ history, message }),
+          // Longer than a normal multi-round turn, so only a hung server trips it.
+          signal: AbortSignal.timeout(70_000),
         });
-        const data = await res.json();
-        const reply = data.reply ?? data.error ?? "No reply.";
-        thinking.textContent = reply;
+        const data = await res.json().catch(() => null);
+        if (!res.ok || typeof data?.reply !== "string") {
+          throw new Error(data?.error || `Uncle cannot answer (HTTP ${res.status}). Try again.`);
+        }
+        thinking.textContent = data.reply;
         // Keep tool calls and results so follow-ups can reuse them without searching again.
         history.push(
           { role: "user", content: message },
-          ...(data.messages ?? [{ role: "assistant", content: reply }]),
+          ...(data.messages ?? [{ role: "assistant", content: data.reply }]),
         );
       } catch (err) {
-        thinking.textContent = "Cannot reach Uncle. Try again.";
+        // Keep failed turns out of history so errors never reach the model and a retry is not duplicated.
+        thinking.classList.add("error");
+        thinking.textContent = err.name === "TimeoutError"
+          ? "Uncle took too long. Try again."
+          : err instanceof TypeError ? "Cannot reach Uncle. Try again." : err.message;
       } finally {
         send.disabled = false;
         input.focus();
