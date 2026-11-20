@@ -50,7 +50,7 @@ async function handleChat(request, env) {
     return json({ error: "Body must be a JSON object" }, 400);
   }
 
-  const { history = [], message } = body;
+  const { history = [], message, session_id } = body;
   if (typeof message !== "string" || message.trim() === "") {
     return json({ error: "message is required" }, 400);
   }
@@ -63,7 +63,7 @@ async function handleChat(request, env) {
   }
 
   try {
-    const { reply, messages } = await runLoop(history, message, env);
+    const { reply, messages } = await runLoop(history, message, env, session_id);
     return json({ reply, messages });
   } catch (err) {
     if (err instanceof ConfigError) {

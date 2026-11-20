@@ -49,6 +49,19 @@
 
     // Conversation so far, in the shape the /chat endpoint expects.
     const history = [];
+    // One id per page load so every turn reaches the same LLM backend and reuses its cache.
+    const sessionId = crypto.randomUUID();
+    // Stays under the server's 50-message history limit.
+    const MAX_HISTORY = 40;
+
+    // Keep the newest messages that fit, starting at a user message so tool calls stay with their results.
+    function trimHistory(messages, max) {
+      if (messages.length <= max) return messages;
+      for (let i = messages.length - max; i < messages.length; i++) {
+        if (messages[i].role === "user") return messages.slice(i);
+      }
+      return [];
+    }
 
     function addBubble(role, text) {
       const div = document.createElement("div");
@@ -69,11 +82,13 @@
       addBubble("user", message);
       const thinking = addBubble("assistant", "Uncle thinking...");
 
+      history.splice(0, history.length, ...trimHistory(history, MAX_HISTORY));
+
       try {
         const res = await fetch("/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ history, message }),
+          body: JSON.stringify({ history, message, session_id: sessionId }),
           // Longer than a normal multi-round turn, so only a hung server trips it.
           signal: AbortSignal.timeout(70_000),
         });
