@@ -7,6 +7,8 @@ import {
   formatPlaces,
   haversineMetres,
   boundingBox,
+  minutesFromNow,
+  normalizeStopCode,
 } from "../src/tools.js";
 
 test("formatForecast picks the requested area", () => {
@@ -50,6 +52,78 @@ test("formatBusArrivals converts durations to whole minutes", () => {
       { service: "107M", next_min: 1, subsequent_min: null },
     ],
   });
+});
+
+test("formatBusArrivals passes an API error through instead of an empty list", () => {
+  const payload = { error: "Invalid bus stop code.", statusCode: 400 };
+  assert.deepEqual(formatBusArrivals(payload, "abcde"), {
+    error: "Invalid bus stop code.",
+  });
+});
+
+test("formatBusArrivals adds a note when the stop has no services", () => {
+  const result = formatBusArrivals({ services: [] }, "99999");
+  assert.equal(result.stop_code, "99999");
+  assert.deepEqual(result.services, []);
+  assert.match(result.note, /stop code may be wrong/);
+});
+
+test("formatBusArrivals reports live from monitored", () => {
+  const payload = {
+    services: [
+      {
+        no: "107",
+        next: { duration_ms: 412_092, monitored: 1 },
+        subsequent: { duration_ms: 1_686_092, monitored: 0 },
+      },
+    ],
+  };
+  assert.deepEqual(formatBusArrivals(payload, "07371").services, [
+    {
+      service: "107",
+      next_min: 7,
+      next_live: true,
+      subsequent_min: 28,
+      subsequent_live: false,
+    },
+  ]);
+});
+
+test("formatBusArrivals moves the subsequent bus up when next is gone", () => {
+  const payload = {
+    services: [
+      {
+        no: "13",
+        next: { duration_ms: -120_000, monitored: 1 },
+        subsequent: { duration_ms: 600_000, monitored: 1 },
+      },
+      { no: "21", next: null, subsequent: { duration_ms: 300_000 } },
+    ],
+  };
+  assert.deepEqual(formatBusArrivals(payload, "07371").services, [
+    { service: "13", next_min: 10, next_live: true, subsequent_min: null },
+    { service: "21", next_min: 5, subsequent_min: null },
+  ]);
+});
+
+test("minutesFromNow treats about 30 s either side of now as arriving", () => {
+  assert.equal(minutesFromNow({ duration_ms: 29_999 }), 0);
+  assert.equal(minutesFromNow({ duration_ms: -30_000 }), 0);
+  assert.equal(minutesFromNow({ duration_ms: -30_001 }), null);
+  assert.equal(minutesFromNow({ duration_ms: 90_000 }), 2);
+  assert.equal(minutesFromNow(null), null);
+  assert.equal(minutesFromNow({}), null);
+});
+
+test("normalizeStopCode pads short numeric codes and rejects the rest", () => {
+  assert.equal(normalizeStopCode("07371"), "07371");
+  assert.equal(normalizeStopCode("7371"), "07371");
+  assert.equal(normalizeStopCode(7371), "07371");
+  assert.equal(normalizeStopCode(" 07371 "), "07371");
+  assert.equal(normalizeStopCode("abc"), null);
+  assert.equal(normalizeStopCode("123456"), null);
+  assert.equal(normalizeStopCode(""), null);
+  assert.equal(normalizeStopCode(undefined), null);
 });
 
 test("haversineMetres measures CT Hub 2 to Lavender MRT at under 550 m", () => {

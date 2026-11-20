@@ -64,13 +64,14 @@ export const toolDefinitions = [
     function: {
       name: "get_bus_arrivals",
       description:
-        "Get the next bus arrivals at a Singapore bus stop, by five-digit stop code.",
+        "Get the next two arrivals per service at a Singapore bus stop, by five-digit stop code. next_min 0 means arriving now; next_live or subsequent_live false means a timetable estimate, not GPS.",
       parameters: {
         type: "object",
         properties: {
           stop_code: {
             type: "string",
-            description: 'Five-digit bus stop code, e.g. "07371".',
+            description:
+              'Five-digit bus stop code as a string, keeping leading zeros, e.g. "07371".',
           },
         },
         required: ["stop_code"],
@@ -231,31 +232,84 @@ export function formatForecast(payload, area) {
 // ---------------------------------------------------------------------------
 
 async function getBusArrivals({ stop_code }) {
-  const url = `${BUS_URL}?id=${encodeURIComponent(stop_code)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
+  const code = normalizeStopCode(stop_code);
+  if (!code) {
+    return {
+      error: `Invalid bus stop code "${stop_code}". Use the five-digit code, e.g. "07371".`,
+    };
+  }
+  const res = await fetch(`${BUS_URL}?id=${code}`, {
+    signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
+  });
   if (!res.ok) {
     return { error: `Bus API returned ${res.status}` };
   }
-  return formatBusArrivals(await res.json(), stop_code);
+  return formatBusArrivals(await res.json(), code);
 }
 
 /**
- * Reduce an arrivelah response to service numbers and minutes to arrival.
+ * Return the five-digit stop code, or null if the input cannot be one.
+ * Shorter all-digit codes are left-padded because models often pass "07371" as a number.
+ */
+export function normalizeStopCode(stopCode) {
+  const code = String(stopCode ?? "").trim();
+  return /^\d{1,5}$/.test(code) ? code.padStart(5, "0") : null;
+}
+
+/**
+ * Reduce an arrivelah response to the next two arrivals per service.
  */
 export function formatBusArrivals(payload, stopCode) {
+  if (payload?.error) {
+    return { error: payload.error };
+  }
   const services = payload?.services ?? [];
+  if (services.length === 0) {
+    return {
+      stop_code: stopCode,
+      services: [],
+      note: "No services found. The stop code may be wrong, or no buses are running now.",
+    };
+  }
   return {
     stop_code: stopCode,
-    services: services.map((s) => ({
-      service: s.no,
-      next_min: minutesFromNow(s.next),
-      subsequent_min: minutesFromNow(s.subsequent),
-    })),
+    services: services.map((s) => {
+      // A departed or missing next bus shifts the subsequent one forward.
+      const [next, subsequent] = [s.next, s.subsequent]
+        .map(toArrival)
+        .filter(Boolean);
+      return {
+        service: s.no,
+        next_min: next?.min ?? null,
+        ...liveField("next_live", next),
+        subsequent_min: subsequent?.min ?? null,
+        ...liveField("subsequent_live", subsequent),
+      };
+    }),
   };
 }
 
-function minutesFromNow(arrival) {
+function toArrival(arrival) {
+  const min = minutesFromNow(arrival);
+  return min === null ? null : { min, live: liveFrom(arrival) };
+}
+
+function liveFrom(arrival) {
+  return typeof arrival.monitored === "number" ? arrival.monitored === 1 : null;
+}
+
+function liveField(key, arrival) {
+  return arrival && arrival.live !== null ? { [key]: arrival.live } : {};
+}
+
+/**
+ * Whole minutes to arrival, 0 within about 30 s either way, null once the bus has gone.
+ */
+export function minutesFromNow(arrival) {
   if (!arrival || typeof arrival.duration_ms !== "number") {
+    return null;
+  }
+  if (arrival.duration_ms < -30_000) {
     return null;
   }
   return Math.max(0, Math.round(arrival.duration_ms / 60000));
