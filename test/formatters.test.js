@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CT_HUB_2,
   formatForecast,
   formatBusArrivals,
+  formatPlaces,
   haversineMetres,
 } from "../src/tools.js";
 
@@ -49,9 +51,27 @@ test("formatBusArrivals converts durations to whole minutes", () => {
   });
 });
 
-test("haversineMetres measures CT Hub 2 to Lavender MRT at under 600 m", () => {
-  const ctHub2 = { latitude: 1.3115, longitude: 103.8615 };
+test("haversineMetres measures CT Hub 2 to Lavender MRT at under 550 m", () => {
   const lavenderMrt = { latitude: 1.3073, longitude: 103.8631 };
-  const distance = haversineMetres(ctHub2, lavenderMrt);
+  const distance = haversineMetres(CT_HUB_2, lavenderMrt);
   assert.ok(distance > 400 && distance < 550, `got ${distance}`);
+});
+
+test("formatPlaces measures distance from CT Hub 2, not Bedok", () => {
+  const places = [
+    {
+      displayName: { text: "Next door" },
+      rating: 4.2,
+      location: { latitude: 1.3116, longitude: 103.863 },
+    },
+    {
+      displayName: { text: "Bedok stall" },
+      rating: 4.5,
+      location: { latitude: 1.324, longitude: 103.927 },
+    },
+  ];
+
+  const [nearby, bedok] = formatPlaces(places, CT_HUB_2);
+  assert.ok(nearby.distance_m < 100, `got ${nearby.distance_m}`);
+  assert.ok(bedok.distance_m > 7000, `got ${bedok.distance_m}`);
 });
