@@ -100,6 +100,14 @@ export async function executeTool(name, args, env) {
 // ---------------------------------------------------------------------------
 
 async function findLunchPlaces({ query, open_now = false }, env) {
+  if (!env.GOOGLE_PLACES_API_KEY) {
+    console.error("find_lunch_places: GOOGLE_PLACES_API_KEY is not set");
+    return {
+      error:
+        "Place search is not configured, so no live results are available. Tell the user you cannot look up places right now.",
+    };
+  }
+
   const centre = { latitude: 1.3236, longitude: 103.9273 };
 
   const body = {
